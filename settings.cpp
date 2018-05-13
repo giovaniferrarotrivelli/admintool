@@ -110,6 +110,7 @@ void Settings::SetDefaultSettings()
 
     qsrand((uint)(QTime::currentTime()).msec());
     pMain->u16logPort = qrand() % ((PORT_MAX + 1) - PORT_MIN) + PORT_MIN;
+    pMain->u16freqUpdate = 2;
 
     pMain->showLoggingInfo = true;
 
@@ -151,6 +152,8 @@ void Settings::ReadSettings()
     {
         pMain->u16logPort = temp;
     }
+
+    pMain->u16freqUpdate = pSettings->value("updateFreq", pMain->u16freqUpdate).toUInt();
 
     if(darkTheme)
     {
@@ -212,6 +215,8 @@ void Settings::SaveSettings()
     pSettings->setValue("showLoggingInfo", pMain->showLoggingInfo);
 
     pSettings->setValue("logPort", pMain->u16logPort);
+
+    pSettings->setValue("updateFreq", pMain->u16freqUpdate);
 
     pSettings->setValue("showRCONpass", pMain->GetUi()->rconShow->isChecked());
 

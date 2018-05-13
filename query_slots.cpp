@@ -13,15 +13,16 @@ extern QList<ServerInfo *> serverList;
 
 QColor errorColor(255, 60, 60);
 QColor queryingColor(80, 170, 80);
+QColor emptyColor(100, 100, 100);
 
-#define UPDATE_TIME 15
+//#define UPDATE_TIME 2
 
 //TIMER TRIGGERED UPDATING
 void MainWindow::TimedUpdate()
 {
     static int run = 1;
 
-    if(run % UPDATE_TIME == 0)
+    if(run % this->u16freqUpdate == 0)
     {
         for(int i = 0; i < this->ui->browserTable->rowCount(); i++)
         {
@@ -112,6 +113,8 @@ void MainWindow::CreateTableItemOrUpdate(size_t row, size_t col, QTableWidget *t
 
             if(info->currentPlayers == info->maxPlayers)
                 playerItem->setTextColor(errorColor);
+            else if(!info->currentPlayers)
+                playerItem->setTextColor(emptyColor);
             else
                 playerItem->setTextColor(queryingColor);
 
@@ -160,9 +163,11 @@ void MainWindow::CreateTableItemOrUpdate(size_t row, size_t col, QTableWidget *t
                 }
                 break;
             case kBrowserColHostname:
+            {
+                item->setText("");
+
                 if(info->queryState == QuerySuccess)
                 {
-                    item->setText("");
                     auto *hostnameLabel = new QLabel();
                     QString hostname;
                     hostnameLabel->setTextFormat(Qt::RichText);
@@ -172,7 +177,7 @@ void MainWindow::CreateTableItemOrUpdate(size_t row, size_t col, QTableWidget *t
                 else if(info->queryState == QueryFailed)
                 {
                     item->setTextColor(errorColor);
-                    item->setText(QString("Failed to query %1, retrying in %2 seconds").arg(info->hostPort, QString::number(UPDATE_TIME)));
+                    item->setText(QString("Failed to query %1, retrying...").arg(info->hostPort));
                 }
                 else if(info->queryState == QueryRunning)
                 {
@@ -194,21 +199,30 @@ void MainWindow::CreateTableItemOrUpdate(size_t row, size_t col, QTableWidget *t
                     item->setToolTip(info->hostPort);
                 }
                 break;
+            }
             case kBrowserColMap:
                 item->setText(info->currentMap);
                 item->setTextColor(errorColor);
                 break;
             case kBrowserColPing:
             {
-                //If timedout show 2000 else show the actual avg.
-                quint16 avgPing = (info->lastPing == 2000) ? 2000 : info->avgPing;
+                if(info->queryState == QuerySuccess)
+                {
+                    //If timedout show 2000 else show the actual avg.
+                    quint16 avgPing = (info->lastPing == 2000) ? 2000 : info->avgPing;
 
-                item->setText(QString("%1, Ø%2").arg(QString::number(info->lastPing), QString::number(avgPing)));
-                if(info->lastPing > 200)
-                    item->setTextColor(errorColor);
+                    item->setText(QString("%1, Ø%2").arg(QString::number(info->lastPing), QString::number(avgPing)));
+                    if(info->lastPing > 200)
+                        item->setTextColor(errorColor);
+                    else
+                        item->setTextColor(queryingColor);
+                    break;
+                }
                 else
-                    item->setTextColor(queryingColor);
-                break;
+                {
+                    item->setText(QString("Timeout"));
+                    item->setTextColor(errorColor);
+                }
             }
         }
     }
@@ -273,9 +287,9 @@ void MainWindow::UpdateInfoTable(ServerInfo *info, bool current, QList<RulesInfo
         }
 
         QList<InfoTableItem> items;
-        items.append(InfoTableItem("Server IP", info->hostPort));
-        items.append(InfoTableItem("PingGraph", ""));//Not used but place holder
         items.append(InfoTableItem("Server Name", info->serverNameRich, true));
+        items.append(InfoTableItem("PingGraph", ""));//Not used but place holder
+        items.append(InfoTableItem("Server IP", info->hostPort));
         items.append(InfoTableItem("Game", gameString));
         items.append(InfoTableItem("Players", info->playerCount));
         items.append(InfoTableItem("Map", mapString));
@@ -325,6 +339,8 @@ void MainWindow::UpdateInfoTable(ServerInfo *info, bool current, QList<RulesInfo
                 for(int i = idx; i < info->pingList.length(); i++)
                 {
                     int h = qRound(((float)info->pingList.at(i)/300.0)*50);
+
+                    qInfo() << info->hostPort << ": " << info->lastPing << " - " << h;
 
                     if(h <= 1)
                         h = 2;
@@ -432,7 +448,7 @@ void MainWindow::ServerInfoReady(InfoReply *reply, ServerTableIndexItem *indexCe
         info->gameName = reply->gamedesc;
         info->type = reply->type;
         info->serverNameRich = reply->hostnameRich;
-        info->playerCount = QString("%1 (%3)/%2").arg(QString::number(reply->players), QString::number(reply->maxplayers), QString::number(reply->bots));
+        info->playerCount = reply->bots ? QString("%1 (%3) / %2").arg(QString::number(reply->players - reply->bots), QString::number(reply->maxplayers), QString::number(reply->bots)) : QString("%1 / %2").arg(QString::number(reply->players), QString::number(reply->maxplayers));
         info->haveInfo = true;
         info->serverID = reply->serverID;
         info->queryState = QuerySuccess;

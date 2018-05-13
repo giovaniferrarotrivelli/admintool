@@ -19,6 +19,7 @@ extern Settings *settings;
 extern QList<ServerInfo *> serverList;
 extern QColor errorColor;
 extern QColor queryingColor;
+extern QColor emptyColor;
 extern QList<ContextMenuItem> contextMenuItems;
 
 void MainWindow::ConnectSlots()
@@ -33,6 +34,7 @@ void MainWindow::ConnectSlots()
     this->ui->actionAdd_Server->connect(this->ui->actionAdd_Server, &QAction::triggered, this, &MainWindow::addServerEntry);
     this->ui->actionDark_Theme->connect(this->ui->actionDark_Theme, &QAction::triggered, this, &MainWindow::darkThemeTriggered);
     this->ui->actionSet_Log_Port->connect(this->ui->actionSet_Log_Port, &QAction::triggered, this, &MainWindow::showPortEntry);
+    this->ui->actionFreqUpdate->connect(this->ui->actionFreqUpdate, &QAction::triggered, this, &MainWindow::setUpdateFrequency);
     this->ui->actionAbout->connect(this->ui->actionAbout, &QAction::triggered, this, &MainWindow::showAbout);
     this->ui->browserTable->connect(this->ui->browserTable, &QTableWidget::itemSelectionChanged, this, &MainWindow::browserTableItemSelected);
     this->ui->rconShow->connect(this->ui->rconShow, &QCheckBox::clicked, this, &MainWindow::showRconClicked);
@@ -240,7 +242,7 @@ bool MainWindow::deleteServerDialog()
     int index = serverList.indexOf(info);
 
     QMessageBox message(this);
-    message.setInformativeText(QString("Delete %1?").arg(info->hostPort));
+    message.setInformativeText(QString("%1").arg(info->hostPort));
     message.setText("Delete server from list?");
     message.setStandardButtons(QMessageBox::Ok|QMessageBox::Cancel);
     message.setDefaultButton(QMessageBox::Cancel);
@@ -372,6 +374,18 @@ void MainWindow::showPortEntry()
     if(ok)
     {
         this->u16logPort = port;
+        settings->SaveSettings();
+    }
+}
+
+void MainWindow::setUpdateFrequency()
+{
+    bool ok;
+    uint sec = QInputDialog::getInt(this, tr("Update Frequency"), tr("Min Value: %1. Max Value: %2").arg(QString::number(1), QString::number(60)), this->u16freqUpdate, 1, 60, 1, &ok, Qt::WindowSystemMenuHint | Qt::WindowTitleHint);
+
+    if(ok)
+    {
+        this->u16freqUpdate = sec;
         settings->SaveSettings();
     }
 }

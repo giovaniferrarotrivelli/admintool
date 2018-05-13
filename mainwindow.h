@@ -109,7 +109,7 @@ public:
     void parseLogLine(QString, ServerInfo *);
     PlayerQuery *pPlayerQuery;
     RulesQuery *pRulesQuery;
-    quint16 u16logPort;
+    quint16 u16logPort, u16freqUpdate;
     bool showLoggingInfo;
 
 protected:
@@ -124,6 +124,7 @@ public slots:
     void RconOutput(ServerInfo *info, QByteArray res);
     void darkThemeTriggered();
     void showPortEntry();
+    void setUpdateFrequency();
     void showAbout();
     void AddRconHistory(QString cmd);
     void AddChatHistory(QString txt);

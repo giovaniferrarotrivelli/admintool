@@ -111,111 +111,105 @@ QByteArray SendUDPQuery(QByteArray query, QHostAddress host, quint16 port)
     qint8 tryCount = 0;
 
     //Use a while loop for rust and other servers that use gamserverport+1 for query
-    do
+    QUdpSocket socket;
+    socket.connectToHost(host, port+tryCount);
+
+    if(socket.isValid())
     {
-        QUdpSocket socket;
-        socket.connectToHost(host, port+tryCount);
-
-        if(socket.isValid())
+        if(socket.write(query) != -1 && socket.waitForReadyRead(QUERY_TIMEOUT))
         {
-            if(socket.write(query) != -1 && socket.waitForReadyRead(QUERY_TIMEOUT))
+            QByteArray reply;
+            reply.resize(socket.pendingDatagramSize());
+            socket.readDatagram(reply.data(), reply.size());
+
+            QDataStream response(reply);
+            response.setByteOrder(QDataStream::LittleEndian);
+
+            qint32 header;
+            response >> header;
+
+            if(header == -1)
             {
-                QByteArray reply;
-                reply.resize(socket.pendingDatagramSize());
-                socket.readDatagram(reply.data(), reply.size());
+                socket.close();
+                return reply;
+            }
+            else if(header == -2)
+            {
+                //We have multiple split packets
+                qint32 id;
+                qint8 skip = 0;
+                response >> id;
 
-                QDataStream response(reply);
-                response.setByteOrder(QDataStream::LittleEndian);
+                bool compressed;
+                response.device()->seek(response.device()->pos()-1);
 
-                qint32 header;
-                response >> header;
+                response >> compressed;
 
-                if(header == -1)
+                // TODO:Support compressed packs
+                if(!compressed)
                 {
-                    socket.close();
-                    return reply;
-                }
-                else if(header == -2)
-                {
-                    //We have multiple split packets
-                    qint32 id;
-                    qint8 skip = 0;
-                    response >> id;
+                    qint8 total;
+                    response >> total;
+                    qint8 packetNum;
+                    response >> packetNum;
 
-                    bool compressed;
-                    response.device()->seek(response.device()->pos()-1);
+                    response >> header;
 
-                    response >> compressed;
-
-                    // TODO:Support compressed packs
-                    if(!compressed)
+                    if(header != -1)
                     {
-                        qint8 total;
-                        response >> total;
-                        qint8 packetNum;
-                        response >> packetNum;
-
+                        response.device()->seek(response.device()->pos()-sizeof(qint32)+sizeof(qint16));
+                        skip = sizeof(qint16);
                         response >> header;
+                    }
 
-                        if(header != -1)
+                    if(header == -1)
+                    {
+                        reply.clear();
+
+                        response.device()->seek(response.device()->pos()-sizeof(qint32));
+
+                        reply.append(response.device()->read(response.device()->size()));
+
+                        do
                         {
-                            response.device()->seek(response.device()->pos()-sizeof(qint32)+sizeof(qint16));
-                            skip = sizeof(qint16);
-                            response >> header;
-                        }
-
-                        if(header == -1)
-                        {
-                            reply.clear();
-
-                            response.device()->seek(response.device()->pos()-sizeof(qint32));
-
-                            reply.append(response.device()->read(response.device()->size()));
-
-                            do
+                            if(socket.isValid())
                             {
-                                if(socket.isValid())
+                                if(socket.write(query) != -1 && socket.waitForReadyRead(QUERY_TIMEOUT))
                                 {
-                                    if(socket.write(query) != -1 && socket.waitForReadyRead(QUERY_TIMEOUT))
-                                    {
-                                        QByteArray replyTemp;
-                                        replyTemp.resize(socket.pendingDatagramSize());
-                                        socket.readDatagram(replyTemp.data(), replyTemp.size());
+                                    QByteArray replyTemp;
+                                    replyTemp.resize(socket.pendingDatagramSize());
+                                    socket.readDatagram(replyTemp.data(), replyTemp.size());
 
-                                        QDataStream tempStream(replyTemp);
-                                        tempStream.setByteOrder(QDataStream::LittleEndian);
+                                    QDataStream tempStream(replyTemp);
+                                    tempStream.setByteOrder(QDataStream::LittleEndian);
 
-                                        tempStream >> header;
+                                    tempStream >> header;
 
-                                        qint32 tempId;
-                                        tempStream >> tempId;
+                                    qint32 tempId;
+                                    tempStream >> tempId;
 
-                                        if(header != -2 || id != tempId)
-                                            break;
+                                    if(header != -2 || id != tempId)
+                                        break;
 
-                                        tempStream.skipRawData(sizeof(qint8));
+                                    tempStream.skipRawData(sizeof(qint8));
 
-                                        tempStream >> packetNum;
-                                        tempStream.skipRawData(skip);
+                                    tempStream >> packetNum;
+                                    tempStream.skipRawData(skip);
 
-                                        reply.append(tempStream.device()->read(tempStream.device()->size()));
-                                    }
+                                    reply.append(tempStream.device()->read(tempStream.device()->size()));
                                 }
+                            }
 
-                            }while(packetNum != total-1);
+                        }while(packetNum != total-1);
 
-                            socket.close();
-                            return reply;
-                        }
+                        socket.close();
+                        return reply;
                     }
                 }
             }
-            socket.close();
         }
-
-        tryCount ++;
-
-    }while(tryCount != 2);
+        socket.close();
+    }
 
     return QByteArray();
 }
@@ -240,86 +234,113 @@ InfoReply::InfoReply(QByteArray response, qint64 ping)
         data >> header;
         data >> check;
 
-        if(header == -1 && check == A2S_INFO_CHECK)
+        if(header == -1)
         {
-            this->success = true;
-            data >> this->protocol;
-            qint64 hostnamePos = data.device()->pos();
-            this->hostnameRich = GetStringFromStream(data);
-            this->map = GetStringFromStream(data);
-            this->mod = GetStringFromStream(data);
-            this->gamedesc = GetStringFromStream(data);
-            qint16 id;
-            data >> id;
-            this->appId = id;
-            data >> this->players;
-            data >> this->maxplayers;
-            data >> this->bots;
-            data.device()->getChar(&(this->type));
-            data.device()->getChar(&(this->os));
-            data >> this->visibility;
-            data >> this->vac;
-
-            //The ship stuff...
-            if(this->appId == k_nAppIDTheShip)
+            if(check == A2S_INFO_CHECK)
             {
-                data.skipRawData(sizeof(qint8)*3);
-            }
+                this->success = true;
+                data >> this->protocol;
+                qint64 hostnamePos = data.device()->pos();
+                this->hostnameRich = GetStringFromStream(data);
+                this->map = GetStringFromStream(data);
+                this->mod = GetStringFromStream(data);
+                this->gamedesc = GetStringFromStream(data);
+                qint16 id;
+                data >> id;
+                this->appId = id;
+                data >> this->players;
+                data >> this->maxplayers;
+                data >> this->bots;
+                data.device()->getChar(&(this->type));
+                data.device()->getChar(&(this->os));
+                data >> this->visibility;
+                data >> this->vac;
 
-            this->version = GetStringFromStream(data);//Version
-
-            qint8 edf;
-            data >> edf;
-
-            if(edf & 0x80)
-            {
-                data.skipRawData(sizeof(qint16));
-            }
-            if(edf & 0x10)
-            {
-                data >> this->rawServerId;
-
-                quint32 accountID = (this->rawServerId & 0xFFFFFFFF);
-                quint64 accountInst = (this->rawServerId >> 32) & 0xFFFFF;
-                quint64 accountType = (this->rawServerId >> 52) & 0xF;
-                quint8 accountUni = (this->rawServerId >> 56) & 0xFF;
-
-                if(accountType == 4 || accountType == 3)
+                //The ship stuff...
+                if(this->appId == k_nAppIDTheShip)
                 {
-                    if(accountType == 4)
-                    {
-                        this->serverID = QString("[A:%1:%2:%3]").arg(QString::number(accountUni), QString::number(accountID), QString::number(accountInst));
-                    }
-                    else
-                    {
-                        this->serverID = QString("[G:%1:%2]").arg(QString::number(accountUni), QString::number(accountID));
-                    }
+                    data.skipRawData(sizeof(qint8)*3);
                 }
 
-            }
-            if(edf & 0x40)
-            {
-                data.skipRawData(sizeof(qint16));
-                GetStringFromStream(data);
-            }
-            if(edf & 0x20)
-            {
-                this->tags = GetStringFromStream(data);
-            }
-            if(edf & 0x01)
-            {
-                qint64 temp;
-                data >> temp;
+                this->version = GetStringFromStream(data);//Version
 
-                this->appId = temp & ((1 << 24) - 1);
-            }
+                qint8 edf;
+                data >> edf;
 
-            // TODO: move these out to a config and add more games.
-            // Unreal Engine uses Extended ASCII instead of UTF8, and also supports colors in hostname.
-            if (this->appId == k_nAppIDKillingFloor || this->appId == k_nAppIDKillingFloor2)
+                if(edf & 0x80)
+                {
+                    data.skipRawData(sizeof(qint16));
+                }
+                if(edf & 0x10)
+                {
+                    data >> this->rawServerId;
+
+                    quint32 accountID = (this->rawServerId & 0xFFFFFFFF);
+                    quint64 accountInst = (this->rawServerId >> 32) & 0xFFFFF;
+                    quint64 accountType = (this->rawServerId >> 52) & 0xF;
+                    quint8 accountUni = (this->rawServerId >> 56) & 0xFF;
+
+                    if(accountType == 4 || accountType == 3)
+                    {
+                        if(accountType == 4)
+                        {
+                            this->serverID = QString("[A:%1:%2:%3]").arg(QString::number(accountUni), QString::number(accountID), QString::number(accountInst));
+                        }
+                        else
+                        {
+                            this->serverID = QString("[G:%1:%2]").arg(QString::number(accountUni), QString::number(accountID));
+                        }
+                    }
+
+                }
+                if(edf & 0x40)
+                {
+                    data.skipRawData(sizeof(qint16));
+                    GetStringFromStream(data);
+                }
+                if(edf & 0x20)
+                {
+                    this->tags = GetStringFromStream(data);
+                }
+                if(edf & 0x01)
+                {
+                    qint64 temp;
+                    data >> temp;
+
+                    this->appId = temp & ((1 << 24) - 1);
+                }
+
+                // TODO: move these out to a config and add more games.
+                // Unreal Engine uses Extended ASCII instead of UTF8, and also supports colors in hostname.
+                if (this->appId == k_nAppIDKillingFloor || this->appId == k_nAppIDKillingFloor2)
+                {
+                    data.device()->seek(hostnamePos);
+                    this->hostnameRich = GetRichUEStringFromStream(data);
+                }
+            }
+            else if(check == 0x6D)
             {
-                data.device()->seek(hostnamePos);
-                this->hostnameRich = GetRichUEStringFromStream(data);
+                this->success = true;
+                data.skipRawData(sizeof(QString)*4);
+
+                this->hostnameRich = GetStringFromStream(data);
+                this->map = GetStringFromStream(data);
+                this->mod = GetStringFromStream(data);
+                this->gamedesc = GetStringFromStream(data);
+
+                data >> this->players;
+                data >> this->maxplayers;
+                data >> this->protocol;
+
+                data.device()->getChar(&(this->type));
+                data.device()->getChar(&(this->os));
+
+                data >> this->visibility;
+
+                data.skipRawData(sizeof(char)*14);
+
+                data >> this->vac;
+                data >> this->bots;
             }
         }
     }
